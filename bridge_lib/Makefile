@@ -28,3 +28,5 @@ main: main.o bw_bridge.o
 
 clean:
 	$(RM) *.o *~ $(bins-y)
+
+-include .*.d
