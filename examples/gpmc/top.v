@@ -37,9 +37,9 @@ gpmc_controller (
     .gpmc_oen(gpmc_oen),
     .gpmc_clk(gpmc_clk),
 
-    .oe(oe),
-    .we(we),
-    .cs(cs),
+    .oen(oe),
+    .wen(we),
+    .csn(cs),
     .address(addr),
     .data_out(data_rx),
     .data_in(data_tx)

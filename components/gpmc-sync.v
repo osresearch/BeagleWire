@@ -1,100 +1,84 @@
-module gpmc_sync (input                    clk,
-                  // GPMC INTERFACE
-                  inout  [15:0]            gpmc_ad,
-                  input                    gpmc_advn,
-                  input                    gpmc_csn1,
-                  input                    gpmc_wein,
-                  input                    gpmc_oen,
-                  input                    gpmc_clk,
+module gpmc_sync(
+	input                    clk,
 
-                  // HOST INTERFACE
-                  output                   oe,
-                  output                   we,
-                  output                   cs,
-                  output [ADDR_WIDTH-1:0]  address,
-                  output [DATA_WIDTH-1:0]  data_out,
-                  input  [DATA_WIDTH-1:0]  data_in);
+	// GPMC INTERFACE
+	inout  [15:0]            gpmc_ad,
+	input                    gpmc_advn,
+	input                    gpmc_csn1,
+	input                    gpmc_wein,
+	input                    gpmc_oen,
+	input                    gpmc_clk,
+
+	// HOST INTERFACE
+	output                   oen,
+	output                   wen,
+	output                   csn,
+	output [ADDR_WIDTH-1:0]  address,
+	output [DATA_WIDTH-1:0]  data_out,
+	input  [DATA_WIDTH-1:0]  data_in
+);
 
 parameter ADDR_WIDTH = 16;
 parameter DATA_WIDTH = 16;
 
-reg [ADDR_WIDTH-1:0] gpmc_addr;
 reg [DATA_WIDTH-1:0] gpmc_data_out;
-wire [DATA_WIDTH-1:0] gpmc_data_in;
-reg csn_bridge;
-reg wen_bridge;
-reg oen_bridge;
-reg [DATA_WIDTH-1:0] write_bridge;
+wire [DATA_WIDTH-1:0] gpmc_data_in_raw;
+reg [DATA_WIDTH-1:0] gpmc_data_in;
+reg advn;
 
-reg csn_sync;
-reg wen_sync;
-reg oen_sync;
-reg [ADDR_WIDTH-1:0] addr_sync;
-reg [DATA_WIDTH-1:0] write_sync;
-
-reg csn;
-reg wen;
-reg oen;
-reg [ADDR_WIDTH-1:0] addr;
-reg [DATA_WIDTH-1:0] write;
-
-initial begin
-    gpmc_addr <= 5'b00000;
-    gpmc_data_out <= 16'b0;
-    csn_bridge <= 1'b1;
-    wen_bridge <= 1'b1;
-    oen_bridge <= 1'b1;
-end
-
-//Tri-State buffer controll
+/*
+ * Tri-State buffer control
+ * Output enable is on the host signals, not ours, so that it
+ * will transition as soon as the host changes the signals.
+ *
+ * This does mean that our output might be invalid for a little while,
+ * but it should be fixed up before the next GPMC clock.
+ */
 SB_IO # (
-    .PIN_TYPE(6'b1010_01),
-    .PULLUP(1'b 0)
+	.PIN_TYPE(6'b1010_01),
+	.PULLUP(1'b 0)
 ) gpmc_ad_io [15:0] (
-    .PACKAGE_PIN(gpmc_ad),
-    .OUTPUT_ENABLE(!gpmc_csn1 && gpmc_advn && !gpmc_oen && gpmc_wein),
-    .D_OUT_0(gpmc_data_out),
-    .D_IN_0(gpmc_data_in)
+	.PACKAGE_PIN(gpmc_ad),
+	.OUTPUT_ENABLE(!gpmc_csn1 && gpmc_advn && !gpmc_oen && gpmc_wein),
+	.D_OUT_0(gpmc_data_out),
+	.D_IN_0(gpmc_data_in_raw)
 );
 
-always @ (negedge gpmc_clk)
-begin : GPMC_LATCH_ADDRESS   
-    if (!gpmc_csn1 && !gpmc_advn && gpmc_wein && gpmc_oen)
-        gpmc_addr <= gpmc_data_in;
-end
 
-always @ (negedge gpmc_clk)
-begin : GEN_RAM_STROBE_SIGNAL
-    csn_bridge <= gpmc_csn1;
-    wen_bridge <= gpmc_wein;
-    oen_bridge <= gpmc_oen;
-    write_bridge <= gpmc_data_in;
-end
+/* Clock crossing buffer for the entirety of the data */
+doublebuf #(.WIDTH(DATA_WIDTH)) gpmc_data_buf(
+	.clk_in(!gpmc_clk),
+	.clk_out(clk),
+	.in(gpmc_data_in_raw),
+	.out(gpmc_data_in)
+);
+
+/* Clock crossing buffer for the control lines */
+doublebuf #(.WIDTH(4)) gpmc_control_buf(
+	.clk_in(!gpmc_clk),
+	.clk_out(clk),
+	.in({gpmc_oen, gpmc_wein, gpmc_csn1, gpmc_advn}),
+	.out({oen, wen, csn, advn})
+);
+
 
 always @ (posedge clk)
 begin
-// Dual flop synchronizer stage 1
-    csn_sync <= csn_bridge;
-    wen_sync <= wen_bridge;
-    oen_sync <= oen_bridge;
-    addr_sync <= gpmc_addr;
-    write_sync <= write_bridge;
+	// always copy the user data to the output register
+	// even if this is not an output cycle
+	gpmc_data_out <= data_in;
 
-// Dual flop synchronizer stage 2
-    csn <= csn_sync;
-    wen <= wen_sync;
-    oen <= oen_sync;
-    addr <= addr_sync;
-    write <= write_sync;
+	// we have been selected and the clock edge is falling
+	if (!csn && !advn && wen && oen)
+	begin
+		// this cycle clocks in the address
+		address <= gpmc_data_in[ADDR_WIDTH-1:0];
+	end
 
-    gpmc_data_out <= data_in;
-
+	if (!csn && advn && !wen && oen) begin
+		// this cycle has data from the host
+		data_out <= gpmc_data_in;
+	end
 end
-
-assign cs = csn;
-assign we = !(!csn && !wen && oen); // wen
-assign oe = !(!csn && wen && !oen); // oen
-assign address = addr;
-assign data_out = write;
 
 endmodule
