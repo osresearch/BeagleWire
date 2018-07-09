@@ -16,6 +16,7 @@ CFLAGS = \
 bins-y += sdram
 bins-y += i2c
 bins-y += main
+bins-y += gpmc
 
 all: $(bins-y)
 
@@ -25,6 +26,7 @@ $(bins-y):
 sdram: sdram.o bw_bridge.o
 i2c: i2c_br.o bw_bridge.o
 main: main.o bw_bridge.o
+gpmc: gpmc.o bw_bridge.o
 
 clean:
 	$(RM) *.o *~ $(bins-y)

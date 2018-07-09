@@ -6,6 +6,7 @@ SUBDIRS += i2c
 SUBDIRS += lcd
 SUBDIRS += lcd_game
 SUBDIRS += pwm
+SUBDIRS += gpmc
 SUBDIRS += sdram
 SUBDIRS += spi
 SUBDIRS += stepper_motor
