@@ -3,7 +3,7 @@
 #include <assert.h>
 
 #include <fcntl.h>
-#include <sys/mman.h>
+#include <sys/time.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <unistd.h>
@@ -98,6 +98,43 @@ int main(int argc, char **argv)
 			);
 	}
 				
+	struct timeval start, end, len;
+	double delta;
+	const int iters = 4096;
+
+	printf("time write\n");
+	gettimeofday(&start, NULL);
+	for (int iter = 0 ; iter < iters ; iter++)
+		for (size_t i=2 ; i < MEM_SIZE ; i++)
+			gpmc[i] = i ^ xor;
+	gettimeofday(&end, NULL);
+	timersub(&end, &start, &len);
+	delta = len.tv_sec * 1e6 + len.tv_usec;
+	printf("write %d words in %.6f sec = %.3f MT/s\n",
+		iters * MEM_SIZE,
+		delta * 1e-6,
+		iters * MEM_SIZE / delta
+	);
+
+	printf("time read\n");
+	errors = 0;
+	gettimeofday(&start, NULL);
+	for (int iter = 0 ; iter < iters ; iter++)
+		for (size_t i=2 ; i < MEM_SIZE ; i++)
+		{
+			if (gpmc[i] != (i ^ xor))
+				errors++;
+		}
+	gettimeofday(&end, NULL);
+	timersub(&end, &start, &len);
+	delta = len.tv_sec * 1e6 + len.tv_usec;
+
+	printf("read %d words in %.6f sec = %.3f MT/s errors=%d\n",
+		iters * MEM_SIZE,
+		delta * 1e-6,
+		iters * MEM_SIZE / delta,
+		errors
+	);
 
 	bridge_close(&br);
 

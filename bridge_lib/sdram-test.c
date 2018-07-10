@@ -1,5 +1,3 @@
-#define _DEFAULT_SOURCE
-
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -86,7 +84,10 @@ sdram_linear_test(
 	}
 
 	printf("%d errors %.3f%%\n", errors, errors * 100.0 / ram_size);
+
+	printf("fast read\n");
 	uint8_t * const mem2 = calloc(sizeof(*mem), ram_size);
+	sdram_read(sdram, mem2, 0, ram_size);
 
 	errors = 0;
 	for(size_t i = 0 ; i < ram_size ; i++)
@@ -97,6 +98,7 @@ sdram_linear_test(
 	printf("%d errors %.3f%%\n", errors, errors * 100.0 / ram_size);
 
 	free(mem);
+	free(mem2);
 }
 
 void
@@ -170,6 +172,11 @@ int main(int argc, char **argv)
 	const size_t ram_size = argc > 1
 		? strtol(argv[1], NULL, 0)
 		: 0x100000;
+	const unsigned seed = argc > 2
+		? strtol(argv[2], NULL, 0)
+		: time(NULL);
+	printf("seed=%d\n", seed);
+	srand(seed);
 
 	sdram_t * const sdram = sdram_init();
 

@@ -10,6 +10,7 @@ CFLAGS = \
         -W \
         -Wall \
         -Wextra \
+	-D_DEFAULT_SOURCE \
 	-Wp,-MMD,$(dir $@).$(notdir $@).d \
         -Wp,-MT,$@ \
 
