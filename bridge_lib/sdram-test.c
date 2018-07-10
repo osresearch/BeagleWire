@@ -59,13 +59,16 @@ sdram_random_test(
 	}
 
 	size_t errors = 0;
+	size_t errors2 = 0;
 	for(size_t i = 1 ; i < ram_size * 1024 ; i++)
 	{
 		if (i % 0x10000 == 0)
-			printf("%08x: %d errors %.3f%%\n",
+			printf("%08x: %d errors %.3f%% (%d second try errors %.3f%%)\n",
 				i,
 				errors,
-				errors * 100.0 / i
+				errors * 100.0 / i,
+				errors2,
+				errors2 * 100.0 / i
 			);
 
 		const size_t j = rand() % ram_size;
@@ -74,9 +77,33 @@ sdram_random_test(
 			continue;
 
 		errors++;
+
+		const uint8_t s2 = sdram_read(sdram, j);
+		if (s == mem[j])
+			continue;
+
+		// if both reads are consistent, then it is probably
+		// a write error
+		if (s == s2)
+			continue;
+
+		if(0)
+		printf("%08x: mem %02x != %02x or %02x\n",
+			j,
+			mem[j],
+			s,
+			s2
+		);
+
+		errors2++;
 	}
 
-	printf("%d errors %.3f%%\n", errors, errors * 100.0 / ram_size);
+	printf("%d errors %.3f%% (%d second try errors %.3f%%)\n",
+		errors,
+		errors * 100.0 / ram_size,
+		errors2,
+		errors2 * 100.0 / ram_size
+	);
 
 	free(mem);
 }
