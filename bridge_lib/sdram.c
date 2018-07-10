@@ -46,14 +46,11 @@ sdram_write(
 ) {
 	//set sdram address
 	sdram->addr_hi = (addr >> 16) & 0x01FF;
-	mfence();
 
 	sdram->addr_lo = (addr >>  0) & 0xFFFF;
-	mfence();
 
 	//set sdram data
 	sdram->wr_data = value;
-	mfence();
 
 	//set wr enable flag
 	sdram->sr = SDRAM_SR_WRITE;
@@ -85,13 +82,10 @@ sdram_read(
 {
 	//set sdra, address
 	sdram->addr_hi = (addr >> 16) & 0x01FF;
-	mfence();
 	sdram->addr_lo = (addr >>  0) & 0xFFFF;
-	mfence();
 
 	//set rd enable flag
 	sdram->sr = SDRAM_SR_READ;
-	mfence();
 
 	int busy_count = 0;
 	int rd_busy_count =0 ;
@@ -118,7 +112,6 @@ sdram_read(
 
 	// get the data, which will unset the read and ready bit
 	const uint8_t val = sdram->rd_data;
-	mfence();
 
 	return val;
 }
