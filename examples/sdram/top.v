@@ -30,6 +30,15 @@ module top( input         clk,
 parameter ADDR_WIDTH = 4;
 parameter DATA_WIDTH = 16;
 
+localparam
+	SDRAM_CMD_READ	= 15,
+	SDRAM_CMD_WRITE	= 14,
+	SDRAM_CMD_RESET	= 13,
+	SDRAM_CMD_BUSY	= 12;
+
+localparam SD_ADDR_WIDTH = 25;
+
+
 wire sys_clk = clk; // not clk_200 for now
 
 reg oen;
@@ -39,164 +48,105 @@ reg [ADDR_WIDTH-1:0]  gpmc_addr;
 reg [DATA_WIDTH-1:0]  data_out;
 reg [DATA_WIDTH-1:0]  data_in;
 
-reg [24:0]  sd_addr;
+reg [SD_ADDR_WIDTH-1:0] sd_addr; // sent to the SDRAM controller
+reg [SD_ADDR_WIDTH-1:0] addr; // local buffer for auto-increment
+
 reg [7:0]  sd_rd_data;
-reg  [7:0]  sd_wr_data;
-reg         sd_wr_enable;
-reg         sd_rd_enable;
+reg [7:0]  sd_wr_data;
+reg        sd_wr_enable;
+reg        sd_rd_enable;
 reg        sd_busy;
-reg         sd_ack;
+reg        sd_ack;
 reg        sd_rd_ready; 
-reg         sd_rst;
+reg        sd_rst;
 
 // debugging
 reg [7:0] sd_command;
 reg [4:0] sd_state;
 
 
-// the SDRAM doesn't respond with busy immediately, so we
-// have our own busy signal until it does.
-reg busy_wait = 0;
-reg sd_rd_ready_stretch;
-reg sd_busy_stretch;
-pulsestretch #(.LENGTH(8)) stretch0(sys_clk, sd_rd_ready, sd_rd_ready_stretch);
-pulsestretch #(.LENGTH(17)) stretch1(sys_clk, sd_busy, sd_busy_stretch);
+reg rd_in_progress = 0;
+reg wr_in_progress = 0;
+reg sd_in_progress = 0;
 
-
-reg rd_ready = 0;
 reg [7:0] rd_data = 0;
 
-reg in_progress = 0;
+reg gpmc_in_progress = 0;
 reg [15:0] cmd_count = 0;
 reg [15:0] last_sr = 0;
 reg [15:0] rd_count = 0;
 
 always @ (posedge sys_clk)
 begin
-    // once the SDRAM has acknowledged our command, unset our busy flags
     if (sd_ack) begin
+        // once the SDRAM has acknowledged our command,
+        // unset our command flags
 	sd_rd_enable <= 0;
 	sd_wr_enable <= 0;
-        busy_wait <= 0;
-    end
-
+    end else
+    if (sd_busy && wr_in_progress) begin
+        // once the SDRAM has started the busy cycle,
+	// unlatch our write-in-progress
+	wr_in_progress <= 0;
+    end else
     if (sd_rd_ready) begin
-	// new data from the SDRAM is ready; latch the ready bit
-	rd_ready <= 1;
+	// new data from the SDRAM is ready; unlatch the ready bit
+	rd_in_progress <= 0;
 	rd_data <= sd_rd_data;
-	rd_count <= rd_count + 1;
     end
 
     if (csn) begin
-	in_progress <= 0;
+	// if the FPGA is not selected, there is nothing else to do
+	gpmc_in_progress <= 0;
     end else
-    if (!wen && oen) begin
-	if (!in_progress)
-		cmd_count <= cmd_count + 1;
-	in_progress <= 1;
-
-	// default is to restore everything to a known state
-	//sd_rst <= 0;
-
-	// GPMC writes destroy any pending reads
+    if (!wen && oen && !gpmc_in_progress) begin
+	// write command from the host to the fpga
+	gpmc_in_progress <= 1;
 
 	case(gpmc_addr)
 	0: begin
-		// update the status register flags
-		// if both read and write are specified, only read
-		if (data_out[15:8] != 8'hA5)
-			last_sr <= data_out;
-		else begin
-		sd_rd_enable <= data_out[0];
-		sd_wr_enable <= data_out[1];
-		sd_rst <= data_out[4];
+		// data + cmd register
+		sd_rd_enable	<= data_out[SDRAM_CMD_READ];
+		rd_in_progress	<= data_out[SDRAM_CMD_READ];
+		sd_wr_enable	<= data_out[SDRAM_CMD_WRITE];
+		wr_in_progress	<= data_out[SDRAM_CMD_WRITE];
+		sd_rst		<= data_out[SDRAM_CMD_RESET];
+		sd_wr_data	<= data_out[7:0];
 
-		// if we are doing a read or write op, go ahead
-		// and set our busy flag until the SDRAM acks the command
-		busy_wait <= data_out[0] || data_out[1];
+		// if this is a read/write operation, update
+		// the SDRAM's address field and auto-increment ours
+		if (data_out[SDRAM_CMD_READ]
+		|| data_out[SDRAM_CMD_WRITE])
+		begin
+			sd_addr <= addr;
+			addr <= addr + 1;
 		end
 	end
-	1: begin
-		sd_addr[15:0] <= data_out[15:0]; // 16 bits
-	end
-	2: begin
-		sd_addr[24:16] <= data_out[8:0]; // 9 bits
-	end
-	3: begin
-		sd_wr_data <= data_out[7:0];
-	end
+	1: addr[15:0] <= data_out[15:0]; // low 16 bits
+	2: addr[SD_ADDR_WIDTH-1:16] <= data_out[(SD_ADDR_WIDTH-16-1):0]; // high 9 bits
 	endcase
     end else
-    if (wen && !oen) begin
+    if (wen && !oen && !gpmc_in_progress) begin
+	// read command from the host of the fpga's registers
+	gpmc_in_progress <= 1;
+
 	case(gpmc_addr)
 	0: begin
-		// fill in the read-side of the status register
-		data_in[0] <= sd_rd_enable;
-		data_in[1] <= sd_wr_enable;
-		//data_in[2] <= sd_busy_stretch;
-
-		// we are waiting for either the real busy
-		// or the ack to our command
-		data_in[2] <= sd_busy || busy_wait;
-
-		data_in[3] <= rd_ready;
-		data_in[4] <= sd_rst;
-		data_in[5] <= sd_busy;
-		data_in[6] <= sd_ack;
-		data_in[15:7] <= 0;
-		//data_in[15:8] <= last_sr; // cmd_count;
-		//data_in[15:4] <= cmd_count;
+		// fill in the status register bits
+		data_in <= 0;
+		data_in[SDRAM_CMD_READ]		<= rd_in_progress;
+		data_in[SDRAM_CMD_WRITE]	<= wr_in_progress || sd_busy;
+		data_in[SDRAM_CMD_RESET]	<= sd_rst;
+		data_in[SDRAM_CMD_BUSY]		<= sd_busy;
+		data_in[7:0]			<= rd_data;
 	end
-	4: begin
-		// read the data and reset the rd_ready flag
-		rd_ready <= 0;
-		data_in[7:0] <= rd_data;
-		data_in[15:8] <= 0;
-	end
-	5: data_in <= cmd_count;
-	6: data_in <= last_sr;
-	7: data_in <= rd_count;
-	8: data_in <= { sd_state, sd_command };
+	1: data_in <= { addr[15:0] };
+	2: data_in <= { 9'h0, addr[SD_ADDR_WIDTH-1:16] };
 	endcase
     end
 
 end
 
-/*
-icepll -i 100 -o 200
-
-F_PLLIN:   100.000 MHz (given)
-F_PLLOUT:  200.000 MHz (requested)
-F_PLLOUT:  200.000 MHz (achieved)
-
-FEEDBACK: SIMPLE
-F_PFD:  100.000 MHz
-F_VCO:  800.000 MHz
-
-DIVR:  0 (4'b0000)
-DIVF:  7 (7'b0000111)
-DIVQ:  2 (3'b010)
-
-FILTER_RANGE: 5 (3'b101)
-*/
-
-wire clk_200;
-wire lock;
-
-SB_PLL40_CORE #(
-    .FEEDBACK_PATH("SIMPLE"),
-    .PLLOUT_SELECT("GENCLK"),
-    .DIVR(4'b0000),
-    .DIVF(7'b0000111),
-    .DIVQ(3'b010),
-    .FILTER_RANGE(3'b101)
-) uut (
-    .LOCK(lock),
-    .RESETB(1'b1),
-    .BYPASS(1'b0),
-    .REFERENCECLK(clk),
-    .PLLOUTCORE(clk_200)
-);
 
 gpmc_sync #(
     .DATA_WIDTH(DATA_WIDTH),

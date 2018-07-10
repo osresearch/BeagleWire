@@ -24,22 +24,38 @@ sdram_linear_test(
 	for(size_t i = 0 ; i < ram_size ; i++)
 	{
 		mem[i] = i & 0xFF; // rand();
-		sdram_write(sdram, i, mem[i]);
+		sdram_addr(sdram, i);
+		sdram_write8(sdram, mem[i]);
 	}
 
 	printf("linear read\n");
 	size_t errors = 0;
 	for(size_t i = 0 ; i < ram_size ; i++)
 	{
-		const uint8_t s = sdram_read(sdram, i);
+		sdram_addr(sdram, i);
+		const uint8_t s = sdram_read8(sdram);
 		if (s == mem[i])
 			continue;
 		errors++;
-		const uint8_t s2 = sdram_read(sdram, i);
+		sdram_addr(sdram, i);
+		const uint8_t s2 = sdram_read8(sdram);
 		printf("%08x: mem %02x != sdram %02x (%02x%s)\n", i, mem[i], s, s2, mem[i] != s2 ? " !" : "");
 	}
 
 	printf("%d errors %.3f%%\n", errors, errors * 100.0 / ram_size);
+
+	printf("fast read\n");
+	uint8_t * const mem2 = calloc(sizeof(*mem2), ram_size);
+	sdram_read(sdram, mem2, 0, ram_size);
+
+	errors = 0;
+	for(size_t i = 0 ; i < ram_size ; i++)
+	{
+		if (mem[i] != mem2[i])
+			errors++;
+	}
+	printf("%d errors %.3f%%\n", errors, errors * 100.0 / ram_size);
+
 	free(mem);
 }
 
@@ -53,10 +69,9 @@ sdram_random_test(
 
 	printf("initialize \n");
 	for(size_t i = 0 ; i < ram_size ; i++)
-	{
 		mem[i] = rand();
-		sdram_write(sdram, i, mem[i]);
-	}
+
+	sdram_write(sdram, 0, mem, ram_size);
 
 	size_t errors = 0;
 	size_t errors2 = 0;
@@ -72,13 +87,15 @@ sdram_random_test(
 			);
 
 		const size_t j = rand() % ram_size;
-		const uint8_t s = sdram_read(sdram, j);
+		sdram_addr(sdram, j);
+		const uint8_t s = sdram_read8(sdram);
 		if (s == mem[j])
 			continue;
 
 		errors++;
 
-		const uint8_t s2 = sdram_read(sdram, j);
+		sdram_addr(sdram, j);
+		const uint8_t s2 = sdram_read8(sdram);
 		if (s == mem[j])
 			continue;
 
