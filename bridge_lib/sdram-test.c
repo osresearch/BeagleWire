@@ -1,8 +1,10 @@
+#define _DEFAULT_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 
 #include <fcntl.h>
-#include <sys/mman.h>
+#include <sys/time.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <unistd.h>
@@ -10,6 +12,47 @@
 #include <errno.h>
 
 #include "sdram.h"
+
+
+void
+sdram_bandwidth_test(
+	sdram_t * const sdram,
+	const size_t ram_size
+)
+{
+	struct timeval start, end, len;
+	double delta;
+	uint8_t * const mem = calloc(sizeof(*mem), ram_size);
+
+	printf("fast read\n");
+	gettimeofday(&start, NULL);
+	sdram_read(sdram, mem, 0, ram_size);
+	gettimeofday(&end, NULL);
+	timersub(&end, &start, &len);
+	delta = len.tv_sec * 1e6 + len.tv_usec;
+
+	printf("Read: %d bytes in %.0f usec, %.3f MB/s\n",
+		ram_size,
+		delta,
+		ram_size / delta
+	);
+
+	printf("fast write\n");
+
+	gettimeofday(&start, NULL);
+	sdram_write(sdram, 0, mem, ram_size);
+	gettimeofday(&end, NULL);
+	timersub(&end, &start, &len);
+	delta = len.tv_sec * 1e6 + len.tv_usec;
+
+	printf("Write: %d bytes in %.0f usec, %.3f MB/s\n",
+		ram_size,
+		delta,
+		ram_size / delta
+	);
+
+	free(mem);
+}
 
 
 void
@@ -43,10 +86,7 @@ sdram_linear_test(
 	}
 
 	printf("%d errors %.3f%%\n", errors, errors * 100.0 / ram_size);
-
-	printf("fast read\n");
-	uint8_t * const mem2 = calloc(sizeof(*mem2), ram_size);
-	sdram_read(sdram, mem2, 0, ram_size);
+	uint8_t * const mem2 = calloc(sizeof(*mem), ram_size);
 
 	errors = 0;
 	for(size_t i = 0 ; i < ram_size ; i++)
@@ -133,6 +173,7 @@ int main(int argc, char **argv)
 
 	sdram_t * const sdram = sdram_init();
 
+	sdram_bandwidth_test(sdram, ram_size);
 	sdram_linear_test(sdram, ram_size);
 	sdram_random_test(sdram, ram_size);
 
