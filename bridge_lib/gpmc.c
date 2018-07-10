@@ -17,10 +17,13 @@ static inline void mfence(void)
 	__asm__ __volatile__("DMB" ::: "memory");
 }
 
+#define MEM_SIZE 1024
+static uint16_t mem[MEM_SIZE];
+
 
 int main(int argc, char **argv)
 {
-	uint8_t xor = argc > 1 ? strtol(argv[1], NULL, 0) : 0;
+	unsigned int seed = argc > 1 ? strtoul(argv[1], NULL, 0) : 0;
 
 	struct bridge br;
 	if (bridge_init(&br, BW_BRIDGE_MEM_ADR, BW_BRIDGE_MEM_SIZE) < 0)
@@ -34,10 +37,14 @@ int main(int argc, char **argv)
 	printf("read count=%04x\n", gpmc[0]);
 	printf("write count=%04x\n", gpmc[1]);
 
+	// do a linear pass to verify simple behaviour
+	srand(seed);
+
+	uint16_t xor = rand();
+
 	printf("writing....\n");
-	for (size_t i=0;i<1024;i++) {
-		gpmc[i] = i ^ xor;
-	}
+	for (size_t i=2 ; i < MEM_SIZE ; i++)
+		mem[i] = gpmc[i] = i ^ xor;
 
 	printf("read count=%04x\n", gpmc[0]);
 	printf("write count=%04x\n", gpmc[1]);
@@ -46,15 +53,16 @@ int main(int argc, char **argv)
 	for (size_t i=2;i<1024;i++) {
 		for(int j = 0 ; j < 4 ; j++)
 		{
-			uint16_t data = gpmc[i];
-			if (data == (i ^ xor))
+			const uint16_t data = gpmc[i];
+			if (data == mem[i])
 				break;
 
-			printf("try %d data[%02x]=%02x%s\n",
+			printf("try %d data[%02x] = %04x != %04x%s\n",
 				j,
 				i,
 				data,
-				data == (i ^ xor) ? "" : " BAD"
+				mem[i],
+				data == mem[i] ? "" : " BAD"
 			);
 			//usleep(100);
 		}
@@ -62,6 +70,34 @@ int main(int argc, char **argv)
 
 	printf("read count=%04x\n", gpmc[0]);
 	printf("write count=%04x\n", gpmc[1]);
+
+	// do a random stress test until we're killed
+	size_t errors = 0;
+	for(size_t t = 1 ; t < MEM_SIZE * MEM_SIZE ; t++)
+	{
+		uint16_t i = rand() % MEM_SIZE;
+		if (i == 0 || i == 1)
+			continue;
+
+		uint16_t g = gpmc[i];
+		uint16_t m = mem[i];
+
+		if (g != m)
+		{
+			//printf("%04x: gpmc=%04x mem=%04x\n", i, g, m);
+			errors++;
+		}
+
+		gpmc[i] = mem[i] = rand();
+
+		if (t % 0x10000 == 0)
+			printf("%08x: %d errors %.3f%%\n",
+				t,
+				errors,
+				errors * 100.0 / t
+			);
+	}
+				
 
 	bridge_close(&br);
 
