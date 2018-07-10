@@ -7,9 +7,14 @@ module sdram_controller (
     input                      rd_enable,
     output                     rd_ready,
 
+    output                     ack,
     output                     busy,
     input                      rst_n,
     input                      clk,
+
+	// debuggin
+	output [7:0] command_out,
+	output [4:0] state_out,
 
     output [SDRADDR_WIDTH-1:0] addr,
     output [BANK_WIDTH-1:0]    bank_addr,
@@ -98,9 +103,8 @@ reg [9:0] refresh_cnt;
 
 reg [7:0] command;
 reg [4:0] state;
-
-reg wr_enable_prev;
-reg rd_enable_prev;
+assign state_out = state;
+assign command_out = command;
 
 reg [7:0] command_nxt;
 reg [3:0] state_cnt_nxt;
@@ -138,14 +142,9 @@ always @ (posedge clk)
     wr_data_r <= 8'b0;
     rd_data_r <= 8'b0;
     busy <= 1'b0;
-    wr_enable_prev <= 1'b0;
-    rd_enable_prev <= 1'b0;
     end
   else
     begin
-
-    wr_enable_prev <= wr_enable;
-    rd_enable_prev <= rd_enable;
 
     state <= next;
     command <= command_nxt;
@@ -187,7 +186,7 @@ always @ (posedge clk)
 
 
 /* Handle logic for sending addresses to SDRAM based on current state*/
-always @*
+always @ (posedge clk)
 begin
     if (state[4])
       data_mask_r <= 1'b0;
@@ -237,33 +236,38 @@ begin
 end
 
 // Next state logic
-always @*
+always @(posedge clk)
 begin
    state_cnt_nxt = 4'd0;
    command_nxt = CMD_NOP;
+
    if (state == IDLE)
-        // Monitor for refresh or hold
-        if (refresh_cnt >= CYCLES_BETWEEN_REFRESH)
+        if (rd_enable)
           begin
-          next = REF_PRE;
-          command_nxt = CMD_PALL;
-          end
-        else if (rd_enable && !rd_enable_prev)
-          begin
+          ack <= 1;
           next = READ_ACT;
           command_nxt = CMD_BACT;
           end
-        else if (wr_enable && !wr_enable_prev)
+        else if (wr_enable)
           begin
+          ack <= 1;
           next = WRIT_ACT;
           command_nxt = CMD_BACT;
+          end
+        else if (refresh_cnt >= CYCLES_BETWEEN_REFRESH)
+          begin
+          ack <= 0;
+          next = REF_PRE;
+          command_nxt = CMD_PALL;
           end
         else
           begin
           // HOLD
           next = IDLE;
+          ack <= 0;
           end
-    else
+    else begin
+          ack <= 0;
       if (!state_cnt)
         case (state)
           // INIT ENGINE
@@ -372,6 +376,7 @@ begin
         next = state;
         command_nxt = command;
         end
+    end
 end
 
 endmodule
