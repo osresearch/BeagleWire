@@ -23,7 +23,7 @@ all: $(bins-y)
 $(bins-y):
 	$(CC) -o $@ $^
 
-sdram: sdram.o bw_bridge.o
+sdram: sdram-test.o sdram.o bw_bridge.o
 i2c: i2c_br.o bw_bridge.o
 main: main.o bw_bridge.o
 gpmc: gpmc.o bw_bridge.o
