@@ -6,6 +6,8 @@ PIN_SRC ?= pinmap.pcf
 
 $(PROJ).blif: $(SRC)
 
+ICEPATH ?= /usr/share/icestorm
+
 %.blif:
 	time yosys \
 		-q \
@@ -19,6 +21,16 @@ $(PROJ).blif: $(SRC)
 		-o $@ \
 		-p \
 		$^
+
+%.timing: %.asc
+	icetime \
+		-d hx8k \
+		-p $(PIN_SRC) \
+		-P $(FOOTPRNT) \
+		-C $(ICEPATH)/chipdb-8k.txt \
+		-r $@ \
+		-t $<
+	tail -10 $@
 
 %.bin: %.asc
 	time icepack $^ $@
