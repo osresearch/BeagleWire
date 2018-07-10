@@ -21,10 +21,8 @@ module gpmc_sync(
 parameter ADDR_WIDTH = 16;
 parameter DATA_WIDTH = 16;
 
-reg [DATA_WIDTH-1:0] gpmc_data_out;
-wire [DATA_WIDTH-1:0] gpmc_data_in_raw;
-reg [DATA_WIDTH-1:0] gpmc_data_in;
-reg advn;
+wire [DATA_WIDTH-1:0] gpmc_data_in;
+reg csn_buffered;
 
 /*
  * Tri-State buffer control
@@ -40,45 +38,31 @@ SB_IO # (
 ) gpmc_ad_io [15:0] (
 	.PACKAGE_PIN(gpmc_ad),
 	.OUTPUT_ENABLE(!gpmc_csn1 && gpmc_advn && !gpmc_oen && gpmc_wein),
-	.D_OUT_0(gpmc_data_out),
-	.D_IN_0(gpmc_data_in_raw)
+	.D_OUT_0(data_in),
+	.D_IN_0(gpmc_data_in)
 );
 
 
-/* Clock crossing buffer for the entirety of the data */
-doublebuf #(.WIDTH(DATA_WIDTH)) gpmc_data_buf(
-	.clk_in(!gpmc_clk),
+doublebuf #(.WIDTH(ADDR_WIDTH)) gpmc_addr_buffer(
+	.clk_in(!gpmc_clk && !gpmc_csn1 && !gpmc_advn && gpmc_wein && gpmc_oen),
 	.clk_out(clk),
-	.in(gpmc_data_in_raw),
-	.out(gpmc_data_in)
+	.in(gpmc_data_in[ADDR_WIDTH-1:0]),
+	.out(address)
 );
 
-/* Clock crossing buffer for the control lines */
-doublebuf #(.WIDTH(4)) gpmc_control_buf(
+doublebuf #(.WIDTH(3+DATA_WIDTH)) gpmc_buffer(
 	.clk_in(!gpmc_clk),
 	.clk_out(clk),
-	.in({gpmc_oen, gpmc_wein, gpmc_csn1, gpmc_advn}),
-	.out({oen, wen, csn, advn})
+	.in({gpmc_csn1, gpmc_wein, gpmc_oen, gpmc_data_in}),
+	.out({csn_buffered, wen, oen, data_out})
 );
 
 
 always @ (posedge clk)
 begin
-	// always copy the user data to the output register
-	// even if this is not an output cycle
-	gpmc_data_out <= data_in;
-
-	// we have been selected and the clock edge is falling
-	if (!csn && !advn && wen && oen)
-	begin
-		// this cycle clocks in the address
-		address <= gpmc_data_in[ADDR_WIDTH-1:0];
-	end
-
-	if (!csn && advn && !wen && oen) begin
-		// this cycle has data from the host
-		data_out <= gpmc_data_in;
-	end
+	// sample the double-buffered cs pin on our clock.
+	// this fixed all of the read errors in the GPMC test
+	csn <= csn_buffered;
 end
 
 endmodule

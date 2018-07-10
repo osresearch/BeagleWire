@@ -59,18 +59,17 @@ begin
     if (!we && oe) begin
 	// write to the sdram controller.
 	gpmc_in_progress <= 1;
-
-	mem[addr] <= data_rx;
 	if (!gpmc_in_progress)
 		wr_count <= wr_count + 1;
-	gpmc_in_progress <= 1;
+
+	mem[addr] <= data_rx;
 
     end else
 
     if (we && !oe) begin
+	gpmc_in_progress <= 1;
 	if (!gpmc_in_progress)
 		rd_count <= rd_count + 1;
-	gpmc_in_progress <= 1;
 
 	if (addr == 0)
 		data_tx <= rd_count;
@@ -79,6 +78,7 @@ begin
 		data_tx <= wr_count;
 	else
 		data_tx <= mem[addr];
+
     end
 end
 
