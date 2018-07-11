@@ -1,18 +1,26 @@
 module sdram_controller (
+    // host contorller
+    input                      clk,
+    input                      rst_n,
     input  [HADDR_WIDTH-1:0]   wr_addr,
     input  [7:0]               wr_data,
     input                      wr_enable,
     input  [HADDR_WIDTH-1:0]   rd_addr,
     output [7:0]               rd_data,
     input                      rd_enable,
+
+    // host controller status signals
     output                     rd_ready,
-
+    output reg                 ack,
     output                     busy,
-    input                      rst_n,
-    input                      clk,
 
-    output [SDRADDR_WIDTH-1:0] addr,
-    output [BANK_WIDTH-1:0]    bank_addr,
+    // debugging
+    output [4:0]               state_debug,
+    output [7:0]               command_debug,
+
+    // physical connections to the SDRAM chip
+    output reg [SDRADDR_WIDTH-1:0] addr,
+    output reg [BANK_WIDTH-1:0]    bank_addr,
     inout  [7:0]               data,
     output                     clock_enable,
     output                     cs_n,
@@ -29,7 +37,7 @@ parameter BANK_WIDTH = 2;
 parameter SDRADDR_WIDTH = ROW_WIDTH > COL_WIDTH ? ROW_WIDTH : COL_WIDTH;
 parameter HADDR_WIDTH   = BANK_WIDTH + ROW_WIDTH + COL_WIDTH;
 
-parameter CLK_FREQUENCY = 133;  // Mhz
+parameter CLK_FREQUENCY = 100;  // Mhz
 parameter REFRESH_TIME =  32;   // ms     (how often we need to refresh)
 parameter REFRESH_COUNT = 8192; // cycles (how many refreshes required per refresh time)
 
@@ -45,11 +53,11 @@ localparam IDLE      = 5'b00000;
 
 localparam INIT_NOP1 = 5'b01000,
            INIT_PRE1 = 5'b01001,
-           INIT_NOP1_1=5'b00101,
+           INIT_NOP2 = 5'b00101,
            INIT_REF1 = 5'b01010,
-           INIT_NOP2 = 5'b01011,
+           INIT_NOP3 = 5'b01011,
            INIT_REF2 = 5'b01100,
-           INIT_NOP3 = 5'b01101,
+           INIT_MRS  = 5'b01101,
            INIT_LOAD = 5'b01110,
            INIT_NOP4 = 5'b01111;
 
@@ -60,24 +68,27 @@ localparam REF_PRE  =  5'b00001,
 
 localparam READ_ACT  = 5'b10000,
            READ_NOP1 = 5'b10001,
-           READ_CAS  = 5'b10010,
-           READ_NOP2 = 5'b10011,
-           READ_READ = 5'b10100;
+           READ_PRECAS=5'b10010,
+           READ_CAS  = 5'b10011,
+           READ_NOP2 = 5'b10100,
+           READ_READ = 5'b10101;
 
 localparam WRIT_ACT  = 5'b11000,
            WRIT_NOP1 = 5'b11001,
-           WRIT_CAS  = 5'b11010,
-           WRIT_NOP2 = 5'b11011;
+           WRIT_PRECAS=5'b11010,
+           WRIT_CAS  = 5'b11011,
+           WRIT_NOP2 = 5'b11100;
 
-// Commands              CCRCWBBA
-//                       ESSSE100
-localparam CMD_PALL = 8'b10010001,
-           CMD_REF  = 8'b10001000,
-           CMD_NOP  = 8'b10111000,
-           CMD_MRS  = 8'b1000000x,
-           CMD_BACT = 8'b10011xxx,
-           CMD_READ = 8'b10101xx1,
-           CMD_WRIT = 8'b10100xx1;
+// Commands              CC RCW BB A
+//                       KS AAE AA 1
+//                       E  SS  10 0
+localparam CMD_PALL = 8'b10_010_00_1, // Precharge all banks
+           CMD_REF  = 8'b10_001_00_0, // CBR Auto-refresh
+           CMD_NOP  = 8'b10_111_00_0, // NOP
+           CMD_MRS  = 8'b10_000_00_x, // Mode Register Set
+           CMD_BACT = 8'b10_011_xx_x, // Bank Activate
+           CMD_READ = 8'b10_101_xx_1, // Read with auto precharge
+           CMD_WRIT = 8'b10_100_xx_1; // Write with auto precharge
 
 reg  [HADDR_WIDTH-1:0]   haddr_r;
 reg  [7:0]               wr_data_r;
@@ -87,7 +98,6 @@ reg                      data_mask_r;
 reg [SDRADDR_WIDTH-1:0]  addr_r;
 reg [BANK_WIDTH-1:0]     bank_addr_r;
 reg                      rd_ready_r;
-wire [7:0]               data_output;
 wire                     data_mask;
 
 assign data_mask = data_mask_r;
@@ -95,24 +105,18 @@ assign rd_data   = rd_data_r;
 
 reg [3:0] state_cnt;
 reg [9:0] refresh_cnt;
+reg refresh_required;
 
 reg [7:0] command;
 reg [4:0] state;
 
-reg wr_enable_prev;
-reg rd_enable_prev;
-
-reg [7:0] command_nxt;
-reg [3:0] state_cnt_nxt;
-reg [4:0] next;
+assign command_debug = command;
+assign state_debug = state;
 
 assign {clock_enable, cs_n, ras_n, cas_n, we_n} = command[7:3];
-// state[4] will be set if mode is read/write
-assign bank_addr      = (state[4]) ? bank_addr_r : command[2:1];
-assign addr           = (state[4] | state == INIT_LOAD) ? addr_r : { {SDRADDR_WIDTH-11{1'b0}}, command[0], 10'd0 };
 
+// Tri-State buffer control
 wire [7:0] data_in_from_buffer;
-//Tri-State buffer controll
 SB_IO # (
     .PIN_TYPE(6'b1010_01),
     .PULLUP(1'b 0)
@@ -125,270 +129,194 @@ SB_IO # (
 
 assign rd_ready = rd_ready_r;
 
+// on the falling edge of our clock, which is the rising edge of
+// the DRAM clock, sample the input
+always @ (negedge clk)
+begin
+	if (state == READ_READ)
+		$display("read input data");
+	rd_data_r <= data_in_from_buffer;
+	rd_ready_r <= state == READ_READ;
+end
+
 // HOST INTERFACE
 // all registered on posedge
+
+
+// Copy our bank, row and commands to the output pins
+always @*
+begin
+	if (state[4]) begin
+		// we're in a read/write state, so set our busy flag
+		busy <= 1;
+		bank_addr <= bank_addr_r;
+		addr <= addr_r;
+	end else
+	begin
+		// neither read nor write
+		busy <= 0;
+		bank_addr <= command[2:1];
+
+		if (state == INIT_LOAD)
+			addr <= addr_r;
+		else begin
+			addr <= 0;
+			addr[10] <= command[0];
+		end
+	end
+end
+
+// Handle refresh counter.  count down until we hit our threshold,
+// then set the refresh required flag so that the state machine
+// will enter the refresh on the next idle loop.
 always @ (posedge clk)
-  if (~rst_n)
-    begin
-    state <= INIT_NOP1;
-    command <= CMD_NOP;
-    state_cnt <= 4'hf;
+begin
+	refresh_required <= 0;
 
-    haddr_r <= {HADDR_WIDTH{1'b0}};
-    wr_data_r <= 8'b0;
-    rd_data_r <= 8'b0;
-    busy <= 1'b0;
-    wr_enable_prev <= 1'b0;
-    rd_enable_prev <= 1'b0;
-    end
-  else
-    begin
-
-    wr_enable_prev <= wr_enable;
-    rd_enable_prev <= rd_enable;
-
-    state <= next;
-    command <= command_nxt;
-
-    if (!state_cnt)
-      state_cnt <= state_cnt_nxt;
-    else
-      state_cnt <= state_cnt - 1'b1;
-
-    if (wr_enable)
-      wr_data_r <= wr_data;
-
-    if (state == READ_READ)
-      begin
-      rd_data_r <= data_in_from_buffer;
-      rd_ready_r <= 1'b1;
-      end
-    else
-      rd_ready_r <= 1'b0;
-
-    busy <= state[4];
-
-    if (rd_enable)
-      haddr_r <= rd_addr;
-    else if (wr_enable)
-      haddr_r <= wr_addr;
-
-    end
-
-// Handle refresh counter
-always @ (posedge clk)
- if (~rst_n)
-   refresh_cnt <= 10'b0;
- else
-   if (state == REF_NOP2)
-     refresh_cnt <= 10'b0;
-   else
-     refresh_cnt <= refresh_cnt + 1'b1;
+	if (~rst_n || state == REF_NOP2)
+		refresh_cnt <= CYCLES_BETWEEN_REFRESH[9:0];
+	else
+	if (refresh_cnt != 0)
+		refresh_cnt <= refresh_cnt - 1;
+	else
+		refresh_required <= 1;
+end
 
 
 /* Handle logic for sending addresses to SDRAM based on current state*/
-always @*
+always @(posedge clk)
 begin
     if (state[4])
       data_mask_r <= 1'b0;
     else
       data_mask_r <= 1'b1;
 
-   bank_addr_r = 2'b00;
-   addr_r = {SDRADDR_WIDTH{1'b0}};
+   if (state == IDLE) begin
+	// prepare to activate the bank and page
+	if (rd_enable)
+	begin
+		haddr_r <= rd_addr;
+		bank_addr_r <= rd_addr[HADDR_WIDTH-1 : HADDR_WIDTH-(BANK_WIDTH)];
+		addr_r <= rd_addr[HADDR_WIDTH-BANK_WIDTH-1 : HADDR_WIDTH-BANK_WIDTH-ROW_WIDTH];
+	end else
+	if (wr_enable) begin
+		wr_data_r <= wr_data;
+		haddr_r <= wr_addr;
+		bank_addr_r <= wr_addr[HADDR_WIDTH-1 : HADDR_WIDTH-(BANK_WIDTH)];
+		addr_r <= wr_addr[HADDR_WIDTH-BANK_WIDTH-1 : HADDR_WIDTH-BANK_WIDTH-ROW_WIDTH];
+	end
+   end else
 
-   if (state == READ_ACT | state == WRIT_ACT)
-     begin
-     bank_addr_r = haddr_r[HADDR_WIDTH-1:HADDR_WIDTH-(BANK_WIDTH)];
-     addr_r = haddr_r[HADDR_WIDTH-(BANK_WIDTH+1):HADDR_WIDTH-(BANK_WIDTH+ROW_WIDTH)];
-     end
-   else if (state == READ_CAS | state == WRIT_CAS)
-     begin
-     // Send Column Address
-     // Set bank to bank to precharge
-     bank_addr_r = haddr_r[HADDR_WIDTH-1:HADDR_WIDTH-(BANK_WIDTH)];
+   if (state == READ_PRECAS || state == WRIT_PRECAS) begin
+     // Prepare to send Column Address (lower bits)
+     // Set bank to precharge
+     bank_addr_r <= haddr_r[HADDR_WIDTH-1 : HADDR_WIDTH-(BANK_WIDTH)];
 
-     // Examples for math
-     //               BANK  ROW    COL
-     // HADDR_WIDTH   2 +   13 +   9   = 24
-     // SDRADDR_WIDTH 13
+     // Select the CAS address to the bottom 
+     addr_r		<= 0;
+     addr_r[10]		<= 1; // A10 == auto precharge
+     addr_r[COL_WIDTH-1:0] <= haddr_r[COL_WIDTH-1:0];
+   end else
 
-     // Set CAS address to:
-     //   0s,
-     //   1 (A10 is always for auto precharge),
-     //   0s,
-     //   column address
-     addr_r = {
-               {SDRADDR_WIDTH-(11){1'b0}},
-               1'b1,                       /* A10 */
-               {10-COL_WIDTH{1'b0}},
-               haddr_r[COL_WIDTH-1:0]
-              };
-     end
-   else if (state == INIT_LOAD)
-     begin
-     // Program mode register during load cycle
-     //                                       B  C  SB
-     //                                       R  A  EUR
-     //                                       S  S-3Q ST
-     //                                       T  654L210
-     addr_r = {{SDRADDR_WIDTH-10{1'b0}}, 10'b1000110000};
-     end
+   if (state == INIT_MRS) begin
+     // Prepare to program mode register during INIT_LOAD cycle
+     // This is only done during a reset, not on every read
+     addr_r		<= 0;
+     addr_r[9]		<= 1; // Burst length (1 = single location)
+     addr_r[8:7]	<= 0; // Mode 00 == normal
+     addr_r[6:4]	<= 2; // CAS latency 2
+     addr_r[3]		<= 0; // Burst type sequential
+     addr_r[2:0]	<= 0; // Burst length 1
+   end
 end
 
 // Next state logic
-always @*
+always @ (posedge clk)
 begin
-   state_cnt_nxt = 4'd0;
-   command_nxt = CMD_NOP;
+   // default is no command, immediate transition, not acking user
+   command <= CMD_NOP;
+   state_cnt <= 0;
+   ack <= 0;
+
+   if (~rst_n) begin
+	// if the host initiates a reset, go into the INIT_NOP1 state
+	// until they release it.
+	// todo: should there be some sort of de-select command here?
+	state <= INIT_NOP1;
+	state_cnt <= 15;
+   end else
    if (state == IDLE)
         // Monitor for refresh or hold
-        if (refresh_cnt >= CYCLES_BETWEEN_REFRESH)
+        if (refresh_required)
           begin
-          next = REF_PRE;
-          command_nxt = CMD_PALL;
+          state <= REF_PRE;
+          command <= CMD_PALL;
           end
-        else if (rd_enable && !rd_enable_prev)
+        else
+	if (rd_enable)
           begin
-          next = READ_ACT;
-          command_nxt = CMD_BACT;
+	  // address will be set in the address handling block
+          state <= READ_ACT;
+          command <= CMD_BACT;
+          ack <= 1;
           end
-        else if (wr_enable && !wr_enable_prev)
+        else
+	if (wr_enable)
           begin
-          next = WRIT_ACT;
-          command_nxt = CMD_BACT;
+	  // address will be set in the address handling block
+          state <= WRIT_ACT;
+          command <= CMD_BACT;
+          ack <= 1;
           end
         else
           begin
-          // HOLD
-          next = IDLE;
+          // HOLD in the idle state
+          state <= IDLE;
           end
     else
-      if (!state_cnt)
+    if (state_cnt != 0)
+      // remain in the current state until state_cnt goes to zero
+      state_cnt <= state_cnt - 1;
+    else
+	// transition to the next state
         case (state)
           // INIT ENGINE
-          INIT_NOP1:
-            begin
-            next = INIT_PRE1;
-            command_nxt = CMD_PALL;
-            end
-          INIT_PRE1:
-            begin
-            next = INIT_NOP1_1;
-            end
-          INIT_NOP1_1:
-            begin
-            next = INIT_REF1;
-            command_nxt = CMD_REF;
-            end
-          INIT_REF1:
-            begin
-            next = INIT_NOP2;
-            state_cnt_nxt = 4'd7;
-            end
-          INIT_NOP2:
-            begin
-            next = INIT_REF2;
-            command_nxt = CMD_REF;
-            end
-          INIT_REF2:
-            begin
-            next = INIT_NOP3;
-            state_cnt_nxt = 4'd7;
-            end
-          INIT_NOP3:
-            begin
-            next = INIT_LOAD;
-            command_nxt = CMD_MRS;
-            end
-          INIT_LOAD:
-            begin
-            next = INIT_NOP4;
-            state_cnt_nxt = 4'd1;
-            end
-          INIT_NOP4:
-            begin
-            next = IDLE;
-            end
+          INIT_NOP1:	begin state <= INIT_PRE1; command <= CMD_PALL; end
+          INIT_PRE1:	begin state <= INIT_NOP2; end
+          INIT_NOP2:	begin state <= INIT_REF1; command <= CMD_REF; end
+          INIT_REF1:	begin state <= INIT_NOP3; state_cnt <= 7; end
+          INIT_NOP3:	begin state <= INIT_REF2; command <= CMD_REF; end
+          INIT_REF2:	begin state <= INIT_NOP4; state_cnt <= 6; end
+          INIT_NOP4:	begin state <= INIT_MRS; end
+          INIT_MRS:	begin state <= INIT_LOAD; command <= CMD_MRS; end
+          INIT_LOAD:	begin state <= REF_NOP2; state_cnt <= 7; end
+          //INIT_NOP5:	begin state <= IDLE; end
 
           // REFRESH
-          REF_PRE:
-            begin
-            next = REF_NOP1;
-            end
-          REF_NOP1:
-            begin
-            next = REF_REF;
-            command_nxt = CMD_REF;
-            end
-          REF_REF:
-            begin
-            next = REF_NOP2;
-            state_cnt_nxt = 4'd7;
-            end
-          REF_NOP2:
-            begin
-            next = IDLE;
-            end
+          REF_PRE:	begin state <= REF_NOP1; end
+          REF_NOP1:	begin state <= REF_REF; command <= CMD_REF; end
+          REF_REF:	begin state <= REF_NOP2; state_cnt <= 7; end
+          REF_NOP2:	begin state <= IDLE; end
 
+          // WRITE:
+          // CAS latency is two, so we spent one cycles in NOP2
+          // tRCD (Active command to R/W command delay time) is same as CAS
+          WRIT_ACT:	begin state <= WRIT_NOP1; state_cnt <= 1; end
+          WRIT_NOP1:	begin state <= WRIT_PRECAS; end
+          WRIT_PRECAS:	begin state <= WRIT_CAS; command <= CMD_WRIT; end
+          WRIT_CAS:	begin state <= WRIT_NOP2; state_cnt <= 0; end
+          WRIT_NOP2:	begin state <= IDLE; state_cnt <= 2; end
 
-          // WRITE
-          WRIT_ACT:
-            begin
-            next = WRIT_NOP1;
-            state_cnt_nxt = 4'd1;
-            end
-          WRIT_NOP1:
-            begin
-            next = WRIT_CAS;
-            command_nxt = CMD_WRIT;
-            end
-          WRIT_CAS:
-            begin
-            next = WRIT_NOP2;
-            state_cnt_nxt = 4'd1;
-            end
-           WRIT_NOP2: //default - IDLE
-            begin
-            next = IDLE;
-            end
+          // READ: CAS latency is two, so we spent one cycles in NOP2
+          READ_ACT:	begin state <= READ_NOP1; state_cnt <= 1; end
+          READ_NOP1:	begin state <= READ_PRECAS; end
+          READ_PRECAS:	begin state <= READ_CAS; command <= CMD_READ; end
+          READ_CAS:	begin state <= READ_NOP2; state_cnt <= 0; end
+          READ_NOP2:	begin state <= READ_READ; end
+          READ_READ:	begin state <= IDLE; end
 
-          // READ
-          READ_ACT:
-            begin
-            next = READ_NOP1;
-            state_cnt_nxt = 4'd1;
-            end
-          READ_NOP1:
-            begin
-            next = READ_CAS;
-            command_nxt = CMD_READ;
-            end
-          READ_CAS:
-            begin
-            next = READ_NOP2;
-            state_cnt_nxt = 4'd1;
-            end
-          READ_NOP2:
-            begin
-            next = READ_READ;
-            end
-          READ_READ:
-            begin
-            next = IDLE;
-            end
-
-          default:
-            begin
-            next = IDLE;
-            end
+          default:	begin state <= IDLE; end
           endcase
-      else
-        begin
-        // Counter Not Reached - HOLD
-        next = state;
-        command_nxt = command;
-        end
 end
 
 endmodule

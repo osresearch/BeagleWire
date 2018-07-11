@@ -60,14 +60,8 @@ reg        sd_ack;
 reg        sd_rd_ready; 
 reg        sd_rst;
 
-// debugging
-reg [7:0] sd_command;
-reg [4:0] sd_state;
-
-
 reg rd_in_progress = 0;
 reg wr_in_progress = 0;
-reg sd_in_progress = 0;
 
 reg [7:0] rd_data = 0;
 
@@ -141,7 +135,7 @@ begin
 		data_in[7:0]			<= rd_data;
 	end
 	1: data_in <= { addr[15:0] };
-	2: data_in <= { 9'h0, addr[SD_ADDR_WIDTH-1:16] };
+	2: data_in <= { 7'h0, addr[SD_ADDR_WIDTH-1:16] };
 	endcase
     end
 
@@ -169,7 +163,7 @@ gpmc_controller (
     .data_in(data_in)
 );
 
-assign sdram_clk = sys_clk;
+assign sdram_clk = !sys_clk;
 
 sdram_controller sdram_controller_1 (
     .wr_addr(sd_addr),
@@ -186,9 +180,6 @@ sdram_controller sdram_controller_1 (
     .clk(sys_clk),
     .rst_n(!sd_rst),
 
-    .state_out(sd_state),
-    .command_out(sd_command),
-    
     .addr(sdram_addr),
     .bank_addr(sdram_bank),
     .data(sdram_data),
