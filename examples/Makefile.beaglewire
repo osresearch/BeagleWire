@@ -39,5 +39,17 @@ ICEPATH ?= /usr/share/icestorm
 %.load: %.bin
 	dd if=$< of=/dev/spidev1.0
 
+define make-test =
+$1: $1.vvp
+	vvp $$<
+endef
+
+test: $(TEST-y)
+$(foreach t,$(TEST-y),$(eval $(call make-test,$t)))
+%.vvp:
+	iverilog -o $@ -s $(basename $@) $^
+
+
 clean:
 	$(RM) *.blif *.asc *.bin
+
