@@ -38,8 +38,7 @@ localparam
 
 localparam SD_ADDR_WIDTH = 25;
 
-
-wire sys_clk = clk; // not clk_200 for now
+wire sys_clk = clk;
 
 reg oen;
 reg wen;
@@ -163,6 +162,9 @@ gpmc_controller (
     .data_in(data_in)
 );
 
+// the sdram is clocked on the rising edge, but that is when all of
+// our states change.  invert the clock so that the FPGA's falling edges
+// (when the states are stable) is the SDRAM's failing edges
 assign sdram_clk = !sys_clk;
 
 sdram_controller sdram_controller_1 (
