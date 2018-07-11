@@ -70,24 +70,24 @@ sdram_controller sdram(
 
 initial begin
 	clk = 0;
-	sd_addr <= 0;
 end
 
 // Step the clock every 5 cycles, so 10 cycles == 1 pulse
 always #5 clk = !clk;
 
-always #5 $display("%6d: %b state=%b cmd=%b rd=%b ack=%b ready=%b",
+always #1 $display("%6d: %b state=%b cmd=%b addr=%b rd=%b ack=%b ready=%b",
 		$time,
 		clk,
 		state,
 		command,
+		sdram_addr,
 		sd_rd_enable,
 		sd_ack,
 		sd_rd_ready
 	);
 
 always begin
-	#10 sd_addr = 0;
+	#10 sd_addr <= 25'hECAFBAD;
 
 	#10 sd_rst = 0;
 
