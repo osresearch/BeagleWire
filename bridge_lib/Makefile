@@ -30,6 +30,6 @@ main: main.o bw_bridge.o
 gpmc: gpmc.o bw_bridge.o
 
 clean:
-	$(RM) *.o *~ $(bins-y)
+	$(RM) *.o *~ $(bins-y) .*.d
 
 -include .*.d
