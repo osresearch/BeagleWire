@@ -11,6 +11,33 @@
 
 #include "sdram.h"
 
+void
+sdram_simple_test(
+	sdram_t * const sdram,
+	const size_t ram_size
+) {
+	uint8_t offset = time(NULL) & 0xFF;
+
+	for(size_t i = 0 ; i < ram_size ; i++)
+	{
+		uint8_t v = i + offset;
+		sdram_write(sdram, i, &v, sizeof(v));
+		usleep(10);
+	}
+
+	for(size_t i = 0 ; i < ram_size ; i++)
+	{
+		if (i % 16 == 0)
+			printf("%08x:", i);
+
+		uint8_t v;
+		sdram_read(sdram, &v, i, sizeof(v));
+		printf("%02x ", (uint8_t)(v - offset));
+
+		if (i % 16 == 15)
+			printf("\n");
+	}
+}
 
 void
 sdram_bandwidth_test(
@@ -80,6 +107,8 @@ sdram_linear_test(
 		errors++;
 		sdram_addr(sdram, i);
 		const uint8_t s2 = sdram_read8(sdram);
+
+		if(0)
 		printf("%08x: mem %02x != sdram %02x (%02x%s)\n", i, mem[i], s, s2, mem[i] != s2 ? " !" : "");
 	}
 
@@ -143,7 +172,7 @@ sdram_random_test(
 
 		// if both reads are consistent, then it is probably
 		// a write error
-		if (s == s2)
+		if (s2 != mem[j])
 			continue;
 
 		if(0)
@@ -167,6 +196,67 @@ sdram_random_test(
 	free(mem);
 }
 
+void
+sdram_pong_test(
+	sdram_t * const sdram,
+	const size_t ram_size
+) {
+	uint32_t a1 = ram_size / 4;
+	uint32_t a2 = ram_size / 4 + ram_size / 2;
+
+	uint8_t old1 = random() & 0xFF;
+	uint8_t old2 = random() & 0xFF;
+
+	sdram_addr(sdram, a1);
+	sdram_write8(sdram, old1);
+	sdram_addr(sdram, a2);
+	sdram_write8(sdram, old2);
+
+	unsigned errors11 = 0;
+	unsigned errors12 = 0;
+	unsigned errors21 = 0;
+	unsigned errors22 = 0;
+
+	for(int i = 0 ; i < 1024 ; i++)
+	{
+		sdram_addr(sdram, a1);
+		uint8_t val11 = sdram_read8(sdram);
+		if (val11 != old1)
+			errors11++;
+
+		sdram_addr(sdram, a1);
+		uint8_t val12 = sdram_read8(sdram);
+		if (val12 != old1)
+			errors12++;
+
+		sdram_addr(sdram, a2);
+		uint8_t val21 = sdram_read8(sdram);
+		if (val21 != old2)
+			errors21++;
+
+		sdram_addr(sdram, a2);
+		uint8_t val22 = sdram_read8(sdram);
+		if (val22 != old2)
+			errors22++;
+
+		old1 = random() & 0xFF;
+		old2 = random() & 0xFF;
+
+		sdram_addr(sdram, a1);
+		sdram_write8(sdram, old1);
+
+		sdram_addr(sdram, a2);
+		sdram_write8(sdram, old2);
+	}
+
+	printf("errors %d %d / %d %d\n",
+		errors11,
+		errors12,
+		errors21,
+		errors22
+      );
+}
+
 int main(int argc, char **argv)
 {
 	const size_t ram_size = argc > 1
@@ -180,6 +270,8 @@ int main(int argc, char **argv)
 
 	sdram_t * const sdram = sdram_init();
 
+	sdram_simple_test(sdram, 0x100);
+	sdram_pong_test(sdram, ram_size);
 	sdram_bandwidth_test(sdram, ram_size);
 	sdram_linear_test(sdram, ram_size);
 	sdram_random_test(sdram, ram_size);
