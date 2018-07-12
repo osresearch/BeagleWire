@@ -131,11 +131,11 @@ assign rd_ready = rd_ready_r;
 // the DRAM clock, sample the input
 // this should only sample when we're in reading state, but need to
 // figure out which state that is....
-always @ (negedge clk)
+always @ (posedge clk)
 begin
 	if (state == READ_READ)
 		$display("read input data");
-	//if (state == READ_READ)
+	if (state == READ_READ)
 	rd_data_r <= data_in_from_buffer;
 end
 
@@ -206,7 +206,7 @@ begin
      addr	<= 0;
      addr[9]	<= 1; // Burst length (1 = single location)
      addr[8:7]	<= 0; // Mode 00 == normal
-     addr[6:4]	<= 2; // CAS latency 2
+     addr[6:4]	<= 2; // CAS latency 2 or 3
      addr[3]	<= 0; // Burst type sequential
      addr[2:0]	<= 0; // Burst length 1
    end else
@@ -297,7 +297,7 @@ begin
           WRIT_NOP2:	begin state <= IDLE; end
 
           // READ: CAS latency is two, so we spent one cycles in NOP2
-          READ_ACT:	begin state <= READ_NOP1; state_cnt <= 2; end
+          READ_ACT:	begin state <= READ_NOP1; state_cnt <= 3; end
           READ_NOP1:	begin state <= READ_PRECAS; end
           READ_PRECAS:	begin state <= READ_CAS; command <= CMD_READ; end
           READ_CAS:	begin state <= READ_NOP2; state_cnt <= 1; end
