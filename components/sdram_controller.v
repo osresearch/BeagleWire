@@ -131,12 +131,12 @@ assign rd_ready = rd_ready_r;
 // the DRAM clock, sample the input
 // this should only sample when we're in reading state, but need to
 // figure out which state that is....
-always @ (posedge clk)
+always @ (negedge clk)
 begin
-	if (state == READ_READ)
+	if (state == READ_READ) begin
 		$display("read input data");
-	if (state == READ_READ)
-	rd_data_r <= data_in_from_buffer;
+		rd_data_r <= data_in_from_buffer;
+	end
 end
 
 
@@ -223,8 +223,6 @@ end
 always @ (posedge clk)
 begin
    // default is no command, immediate transition, not acking user
-   command <= CMD_NOP;
-   state_cnt <= 0;
    ack <= 0;
 
    if (~rst_n) begin
@@ -232,6 +230,7 @@ begin
 	// until they release it.
 	// todo: should there be some sort of de-select command here?
 	state <= INIT_NOP1;
+        command <= CMD_NOP;
 	state_cnt <= 15;
    end else
    if (state == IDLE)
@@ -240,6 +239,7 @@ begin
           begin
           state <= REF_PRE;
           command <= CMD_PALL;
+	  state_cnt <= 0;
           end
         else
 	if (rd_enable)
@@ -247,6 +247,7 @@ begin
 	  // address will be set in the address handling block
           state <= READ_ACT;
           command <= CMD_BACT;
+	  state_cnt <= 0;
           ack <= 1;
           end
         else
@@ -255,19 +256,25 @@ begin
 	  // address will be set in the address handling block
           state <= WRIT_ACT;
           command <= CMD_BACT;
+	  state_cnt <= 0;
           ack <= 1;
           end
         else
           begin
           // HOLD in the idle state
           state <= IDLE;
+          command <= CMD_NOP;
           end
     else
     if (state_cnt != 0)
       // remain in the current state until state_cnt goes to zero
+      // command does not change
       state_cnt <= state_cnt - 1;
-    else
-	// transition to the next state
+    else begin
+	// transition to the next state, default is NOP and only one cycle
+	command <= CMD_NOP;
+	state_cnt <= 0;
+
         case (state)
           // INIT ENGINE
           INIT_NOP1:	begin state <= INIT_PRE1; command <= CMD_PALL; end
@@ -300,12 +307,13 @@ begin
           READ_ACT:	begin state <= READ_NOP1; state_cnt <= 3; end
           READ_NOP1:	begin state <= READ_PRECAS; end
           READ_PRECAS:	begin state <= READ_CAS; command <= CMD_READ; end
-          READ_CAS:	begin state <= READ_NOP2; state_cnt <= 1; end
+          READ_CAS:	begin state <= READ_NOP2; state_cnt <= 0; end
           READ_NOP2:	begin state <= READ_READ; end
           READ_READ:	begin state <= IDLE; end
 
           default:	begin state <= IDLE; end
           endcase
+    end
 end
 
 endmodule
