@@ -6,11 +6,11 @@ module sdram_controller (
     input  [7:0]               wr_data,
     input                      wr_enable,
     input  [HADDR_WIDTH-1:0]   rd_addr,
-    output [7:0]               rd_data,
+    output reg [7:0]           rd_data,
     input                      rd_enable,
 
     // host controller status signals
-    output                     rd_ready,
+    output reg                 rd_ready,
     output reg                 ack,
     output                     busy,
 
@@ -19,6 +19,7 @@ module sdram_controller (
     output [7:0]               command_debug,
 
     // physical connections to the SDRAM chip
+    input                      sd_clk,
     output reg [SDRADDR_WIDTH-1:0] addr,
     output reg [BANK_WIDTH-1:0]    bank_addr,
     inout  [7:0]               data,
@@ -27,7 +28,7 @@ module sdram_controller (
     output                     ras_n,
     output                     cas_n,
     output                     we_n,
-    output                     data_mask 
+    output reg                 data_mask 
 );
 
 parameter ROW_WIDTH = 13;
@@ -92,14 +93,7 @@ localparam CMD_PALL = 8'b10_010_00_1, // Precharge all banks
 
 reg  [HADDR_WIDTH-1:0]   haddr_r;
 reg  [7:0]               wr_data_r;
-reg  [7:0]               rd_data_r;
 reg                      busy;
-reg                      data_mask_r;
-reg                      rd_ready_r;
-wire                     data_mask;
-
-assign data_mask = data_mask_r;
-assign rd_data   = rd_data_r;
 
 reg [3:0] state_cnt;
 reg [9:0] refresh_cnt;
@@ -125,8 +119,6 @@ SB_IO # (
     .D_IN_0(data_in_from_buffer)
 );
 
-assign rd_ready = rd_ready_r;
-
 // on the falling edge of our clock, which is the rising edge of
 // the DRAM clock, sample the input
 // this should only sample when we're in reading state, but need to
@@ -135,7 +127,7 @@ always @ (negedge clk)
 begin
 	if (state == READ_READ) begin
 		$display("read input data");
-		rd_data_r <= data_in_from_buffer;
+		rd_data <= data_in_from_buffer;
 	end
 end
 
@@ -162,16 +154,17 @@ end
  */
 always @(posedge clk)
 begin
-    if (state[4])
-      data_mask_r <= 1'b0;
-    else
-      data_mask_r <= 1'b1;
+    if (state[4]) begin
+	data_mask <= 0; // active low
+	busy <= 1; // active hi
+    end else begin
+	data_mask <= 1;
+	busy <= 0;
+    end
 
     // if we've reached the final read state, signal that we have data
-    rd_ready_r <= state == READ_READ;
+    rd_ready <= state == READ_READ;
 
-    // we're in a read/write state, so set our busy flag
-    busy <= state[4]; 
 
    if (state == IDLE) begin
 	// prepare to activate the bank and page
@@ -307,7 +300,7 @@ begin
           READ_ACT:	begin state <= READ_NOP1; state_cnt <= 3; end
           READ_NOP1:	begin state <= READ_PRECAS; end
           READ_PRECAS:	begin state <= READ_CAS; command <= CMD_READ; end
-          READ_CAS:	begin state <= READ_NOP2; state_cnt <= 0; end
+          READ_CAS:	begin state <= READ_READ; state_cnt <= 0; end
           READ_NOP2:	begin state <= READ_READ; end
           READ_READ:	begin state <= IDLE; end
 

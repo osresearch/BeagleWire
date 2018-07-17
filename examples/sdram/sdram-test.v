@@ -29,7 +29,7 @@ reg [SD_ADDR_WIDTH-1:0] sd_addr; // sent to the SDRAM controller
             wire [7:0]  sdram_data;
             wire [1:0]  sdram_bank;
 
-            reg        sdram_clk;
+            wire        sdram_clk;
             wire        sdram_cke;
             wire        sdram_we;
             wire        sdram_cs;
@@ -55,6 +55,7 @@ sdram_controller sdram(
 	.state_debug(state),
 	.command_debug(command),
 
+    .sd_clk(sdram_clk),
     .addr(sdram_addr),
     .bank_addr(sdram_bank),
     .data(sdram_data),
@@ -75,12 +76,6 @@ end
 
 // Step the clock every 5 cycles, so 10 cycles == 1 pulse
 always #5 clk = !clk;
-// step the sdram clock 90 degrees out of phase from the system clock
-always begin
-	#3 sdram_clk = 0;
-	#5 sdram_clk = clk;
-	#2 ;
-end
 
 always #1 $display("%6d: %b %b state=%b cmd=%b addr=%b rd=%b ack=%b ready=%b",
 		$time,

@@ -184,6 +184,7 @@ sdram_controller sdram_controller_1 (
     .clk(sys_clk),
     .rst_n(!sd_rst),
 
+    .sd_clk(sdram_clk),
     .addr(sdram_addr),
     .bank_addr(sdram_bank),
     .data(sdram_data),
