@@ -6,6 +6,7 @@ module top( input         clk,
             input         gpmc_oen,
             input         gpmc_clk,
             
+/*
             input  [1:0]  btn,
             input  [1:0]  sw,
             output [3:0]  led,
@@ -14,6 +15,7 @@ module top( input         clk,
             output [7:0]  pmod2,
             output [7:0]  pmod3,
             output [7:0]  pmod4,
+*/
 
             output [12:0] sdram_addr,
             inout  [7:0]  sdram_data,
