@@ -27,7 +27,6 @@ ICEPATH ?= /usr/share/icestorm
 		-d hx8k \
 		-p $(PIN_SRC) \
 		-P $(FOOTPRNT) \
-		-C $(ICEPATH)/chipdb-8k.txt \
 		-r $@ \
 		-t $<
 	tail -10 $@
