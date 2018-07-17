@@ -21,7 +21,6 @@ wire [7:0]  sd_wr_data;
 wire sd_rd_ready;
 reg sd_rst = 0;
 wire sd_ack;
-wire sd_busy;
 
 localparam SD_ADDR_WIDTH = 25;
 reg [SD_ADDR_WIDTH-1:0] sd_addr; // sent to the SDRAM controller
@@ -30,7 +29,7 @@ reg [SD_ADDR_WIDTH-1:0] sd_addr; // sent to the SDRAM controller
             wire [7:0]  sdram_data;
             wire [1:0]  sdram_bank;
 
-            wire        sdram_clk;
+            reg        sdram_clk;
             wire        sdram_cke;
             wire        sdram_we;
             wire        sdram_cs;
@@ -48,7 +47,6 @@ sdram_controller sdram(
     .rd_enable(sd_rd_enable),
     .rd_data(sd_rd_data),
     .rd_ready(sd_rd_ready),
-    .busy(sd_busy),
     .ack(sd_ack),
     
     .clk(clk),
@@ -68,16 +66,26 @@ sdram_controller sdram(
     .data_mask(sdram_dqm)
 );
 
+
 initial begin
 	clk = 0;
+	$dumpfile("test.vcd");
+	$dumpvars(0, sdram_testbench);
 end
 
 // Step the clock every 5 cycles, so 10 cycles == 1 pulse
 always #5 clk = !clk;
+// step the sdram clock 90 degrees out of phase from the system clock
+always begin
+	#3 sdram_clk = 0;
+	#5 sdram_clk = clk;
+	#2 ;
+end
 
-always #1 $display("%6d: %b state=%b cmd=%b addr=%b rd=%b ack=%b ready=%b",
+always #1 $display("%6d: %b %b state=%b cmd=%b addr=%b rd=%b ack=%b ready=%b",
 		$time,
 		clk,
+		sdram_clk,
 		state,
 		command,
 		sdram_addr,
@@ -94,7 +102,7 @@ always begin
 	#150 sd_rd_enable = 1;
 	#80 sd_rd_enable = 0;
 
-	#1000 $finish;
+	#200 $finish;
 end
 
 always @(posedge clk)
