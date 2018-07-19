@@ -10,8 +10,10 @@ module top( input         clk,
             input  [1:0]  btn,
             input  [1:0]  sw,
             output [3:0]  led,
+*/
 
             output [7:0]  pmod1,
+/*
             output [7:0]  pmod2,
             output [7:0]  pmod3,
             output [7:0]  pmod4,
@@ -70,6 +72,9 @@ reg gpmc_in_progress = 0;
 reg [15:0] cmd_count = 0;
 reg [15:0] last_sr = 0;
 reg [15:0] rd_count = 0;
+
+//assign pmod[0] = sd_busy;
+//assign pmod[1] = sd_rd_enable;
 
 always @ (posedge sys_clk)
 begin
@@ -164,10 +169,44 @@ gpmc_controller (
     .data_in(data_in)
 );
 
+/*
 // the sdram is clocked on the rising edge, but that is when all of
 // our states change.  invert the clock so that the FPGA's falling edges
 // (when the states are stable) is the SDRAM's failing edges
-assign sdram_clk = !sys_clk;
+*/
+wire lock;
+wire clk_90phase;
+
+/*
+ * Generate the SDRAM clock 90-degrees out of phase with the
+ * system clock.  This ensures that the output pins are latched well
+ * before the rising edge of the SDRAM clock.  The only complication is
+ * that the SDRAM read cycle will have to be clocked on the rising edge
+ * of this clock, not the normal one.
+ * 
+ * Given input frequency:       100.000 MHz
+ * Requested output frequency:  100.000 MHz
+ * Achieved output frequency:   100.000 MHz
+ */
+
+SB_PLL40_CORE #(
+	.FEEDBACK_PATH("PHASE_AND_DELAY"),
+	.PLLOUT_SELECT("SHIFTREG_90deg"),
+	.DIVR(4'b0000),		// DIVR =  0
+	.DIVF(7'b0000000),	// DIVF =  0
+	.DIVQ(3'b011),		// DIVQ =  3
+	.FILTER_RANGE(3'b101)	// FILTER_RANGE = 5
+) uut (
+	.LOCK(lock),
+	.RESETB(1'b1),
+	.BYPASS(1'b0),
+	.REFERENCECLK(sys_clk),
+	.PLLOUTCORE(clk_90phase)
+);
+
+//assign sdram_clk = !sys_clk;
+assign sdram_clk = clk_90phase;
+
 
 sdram_controller sdram_controller_1 (
     .wr_addr(sd_addr),

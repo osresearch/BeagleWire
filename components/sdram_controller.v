@@ -28,7 +28,7 @@ module sdram_controller (
     output                     ras_n,
     output                     cas_n,
     output                     we_n,
-    output reg                 data_mask 
+    output                     data_mask 
 );
 
 parameter ROW_WIDTH = 13;
@@ -80,16 +80,16 @@ localparam WRIT_ACT  = 5'b11000,
            WRIT_CAS  = 5'b11011,
            WRIT_NOP2 = 5'b11100;
 
-// Commands              CC RCW BB A
-//                       KS AAE AA 1
-//                       E  SS  10 0
-localparam CMD_PALL = 8'b10_010_00_1, // Precharge all banks
-           CMD_REF  = 8'b10_001_00_0, // CBR Auto-refresh
-           CMD_NOP  = 8'b10_111_00_0, // NOP
-           CMD_MRS  = 8'b10_000_00_x, // Mode Register Set
-           CMD_BACT = 8'b10_011_xx_x, // Bank Activate
-           CMD_READ = 8'b10_101_xx_1, // Read with auto precharge
-           CMD_WRIT = 8'b10_100_xx_1; // Write with auto precharge
+// Commands              D CC RCW BB A
+//                       Q KS AAE AA 1
+//                       M E  SS  10 0
+localparam CMD_PALL = 9'bx_10_010_00_1, // Precharge all banks
+           CMD_REF  = 9'bx_10_001_00_0, // CBR Auto-refresh
+           CMD_NOP  = 9'bx_10_111_00_0, // NOP
+           CMD_MRS  = 9'bx_10_000_00_x, // Mode Register Set
+           CMD_BACT = 9'bx_10_011_xx_x, // Bank Activate
+           CMD_READ = 9'b0_10_101_xx_1, // Read with auto precharge
+           CMD_WRIT = 9'b0_10_100_xx_1; // Write with auto precharge
 
 reg  [HADDR_WIDTH-1:0]   haddr_r;
 reg  [7:0]               wr_data_r;
@@ -99,13 +99,19 @@ reg [3:0] state_cnt;
 reg [9:0] refresh_cnt;
 reg refresh_required;
 
-reg [7:0] command;
+reg [8:0] command;
 reg [4:0] state;
 
 assign command_debug = command;
 assign state_debug = state;
 
-assign {clock_enable, cs_n, ras_n, cas_n, we_n} = command[7:3];
+// Output the control bits from the command word
+assign data_mask	= command[8];
+assign clock_enable	= command[7];
+assign cs_n		= command[6];
+assign ras_n		= command[5];
+assign cas_n		= command[4];
+assign we_n		= command[3];
 
 // Tri-State buffer control
 wire [7:0] data_in_from_buffer;
@@ -114,17 +120,17 @@ SB_IO # (
     .PULLUP(1'b 0)
 ) data_io [7:0] (
     .PACKAGE_PIN(data),
-    .OUTPUT_ENABLE(state == WRIT_CAS),
+    .OUTPUT_ENABLE(!we_n),
     .D_OUT_0(wr_data_r),
     .D_IN_0(data_in_from_buffer)
 );
 
-// on the falling edge of our clock, which is the rising edge of
-// the DRAM clock, sample the input
+// on the rising edge of the DRAM clock, sample the input
 // this should only sample when we're in reading state, but need to
 // figure out which state that is....
-always @ (negedge clk)
+always @ (posedge sd_clk)
 begin
+	if (!we_n) $display("write output");
 	if (state == READ_READ) begin
 		$display("read input data");
 		rd_data <= data_in_from_buffer;
@@ -154,13 +160,7 @@ end
  */
 always @(posedge clk)
 begin
-    if (state[4]) begin
-	data_mask <= 0; // active low
-	busy <= 1; // active hi
-    end else begin
-	data_mask <= 1;
-	busy <= 0;
-    end
+    busy <= state[4];
 
     // if we've reached the final read state, signal that we have data
     rd_ready <= state == READ_READ;
@@ -238,6 +238,7 @@ begin
 	if (rd_enable)
           begin
 	  // address will be set in the address handling block
+	$display("READ");
           state <= READ_ACT;
           command <= CMD_BACT;
 	  state_cnt <= 0;
@@ -290,17 +291,17 @@ begin
           // WRITE:
           // CAS latency is two, so we spent one cycles in NOP2
           // tRCD (Active command to R/W command delay time) is same as CAS
-          WRIT_ACT:	begin state <= WRIT_NOP1; state_cnt <= 2; end
+          WRIT_ACT:	begin state <= WRIT_NOP1; state_cnt <= 3; end
           WRIT_NOP1:	begin state <= WRIT_PRECAS; end
           WRIT_PRECAS:	begin state <= WRIT_CAS; command <= CMD_WRIT; end
           WRIT_CAS:	begin state <= WRIT_NOP2; state_cnt <= 2; end
           WRIT_NOP2:	begin state <= IDLE; end
 
           // READ: CAS latency is two, so we spent one cycles in NOP2
-          READ_ACT:	begin state <= READ_NOP1; state_cnt <= 3; end
+          READ_ACT:	begin state <= READ_NOP1; state_cnt <= 2; end
           READ_NOP1:	begin state <= READ_PRECAS; end
           READ_PRECAS:	begin state <= READ_CAS; command <= CMD_READ; end
-          READ_CAS:	begin state <= READ_READ; state_cnt <= 0; end
+          READ_CAS:	begin state <= READ_NOP2; state_cnt <= 0; end
           READ_NOP2:	begin state <= READ_READ; end
           READ_READ:	begin state <= IDLE; end
 
