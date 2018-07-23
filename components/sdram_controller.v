@@ -134,9 +134,18 @@ SB_IO # (
     .D_IN_0(data_in_from_buffer)
 );
 
-wire sd_clk_line = 0;
-assign sd_clk = !clk; //sd_clk_line;
-//phase90 phaser(clk, sd_clk_line);
+// this is weird -- if this is removed and the tests that
+// check for it, the design fails to read successfully from the DRAM
+// despite having what looks like the same timings.
+wire bogus_wire_always_false = 0;
+
+/*
+ * Drive the DRAM with a 180-degree phase shifted version of the system
+ * clock. This ensures that all transitions will have settled since
+ * the outputs only change on the positive edge of clk (and will be
+ * settled by the negative edge).
+ */
+assign sd_clk = !clk;
 
 // on the rising edge of the DRAM clock, sample the input
 // this should only sample when we're in reading state, but need to
@@ -144,7 +153,7 @@ assign sd_clk = !clk; //sd_clk_line;
 always @ (posedge sd_clk)
 begin
 	// on the rising edge, read from the incoming buffer
-	//if (sd_clk_line)
+	//if (bogus_wire_always_false)
 	if (state == READ_READ) begin
 		$display("read input data");
 		rd_data <= data_in_from_buffer;
@@ -196,7 +205,7 @@ begin
 	end
    end else
 
-   if (sd_clk_line) begin
+   if (bogus_wire_always_false) begin
 	// no changes with clock high
    end else
 
@@ -278,8 +287,8 @@ begin
           command <= CMD_NOP;
           end
     end else
-    if (sd_clk_line) begin
-	// no changes while sd_clk is high,
+    if (bogus_wire_always_false) begin
+	// no change while sd_clk is high
     end else
     if (state_cnt != 0)
       // remain in the current state until state_cnt goes to zero

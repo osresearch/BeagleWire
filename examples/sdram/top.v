@@ -204,9 +204,9 @@ SB_PLL40_CORE #(
 	.PLLOUTCORE(clk_90phase)
 );
 
+// clock assignment will happen in the DRAM controller
 //assign sdram_clk = !sys_clk;
-assign sdram_clk = clk_90phase;
-
+//assign sdram_clk = clk_90phase;
 
 sdram_controller sdram_controller_1 (
     .wr_addr(sd_addr),
