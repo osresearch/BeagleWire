@@ -1,3 +1,12 @@
+module phase90(
+	input in,
+	output out
+);
+reg val = 0;
+assign out = val;
+always @(negedge in) val = !val;
+endmodule
+
 module sdram_controller (
     // host contorller
     input                      clk,
@@ -19,7 +28,7 @@ module sdram_controller (
     output [7:0]               command_debug,
 
     // physical connections to the SDRAM chip
-    input                      sd_clk,
+    output                     sd_clk,
     output reg [SDRADDR_WIDTH-1:0] addr,
     output reg [BANK_WIDTH-1:0]    bank_addr,
     inout  [7:0]               data,
@@ -125,12 +134,17 @@ SB_IO # (
     .D_IN_0(data_in_from_buffer)
 );
 
+wire sd_clk_line = 0;
+assign sd_clk = !clk; //sd_clk_line;
+//phase90 phaser(clk, sd_clk_line);
+
 // on the rising edge of the DRAM clock, sample the input
 // this should only sample when we're in reading state, but need to
 // figure out which state that is....
 always @ (posedge sd_clk)
 begin
-	if (!we_n) $display("write output");
+	// on the rising edge, read from the incoming buffer
+	//if (sd_clk_line)
 	if (state == READ_READ) begin
 		$display("read input data");
 		rd_data <= data_in_from_buffer;
@@ -182,6 +196,10 @@ begin
 	end
    end else
 
+   if (sd_clk_line) begin
+	// no changes with clock high
+   end else
+
    if (state == READ_PRECAS || state == WRIT_PRECAS) begin
      // Prepare to send Column Address (lower bits)
      // Set bank to precharge
@@ -199,7 +217,7 @@ begin
      addr	<= 0;
      addr[9]	<= 1; // Burst length (1 = single location)
      addr[8:7]	<= 0; // Mode 00 == normal
-     addr[6:4]	<= 2; // CAS latency 2 or 3
+     addr[6:4]	<= 3; // CAS latency 2 or 3
      addr[3]	<= 0; // Burst type sequential
      addr[2:0]	<= 0; // Burst length 1
    end else
@@ -226,7 +244,7 @@ begin
         command <= CMD_NOP;
 	state_cnt <= 15;
    end else
-   if (state == IDLE)
+   if (state == IDLE) begin
         // Monitor for refresh or hold
         if (refresh_required)
           begin
@@ -259,7 +277,10 @@ begin
           state <= IDLE;
           command <= CMD_NOP;
           end
-    else
+    end else
+    if (sd_clk_line) begin
+	// no changes while sd_clk is high,
+    end else
     if (state_cnt != 0)
       // remain in the current state until state_cnt goes to zero
       // command does not change
@@ -289,21 +310,22 @@ begin
           REF_NOP2:	begin state <= IDLE; end
 
           // WRITE:
-          // CAS latency is two, so we spent one cycles in NOP2
+          // CAS latency is two, so we spent two cycles in NOP2
           // tRCD (Active command to R/W command delay time) is same as CAS
           WRIT_ACT:	begin state <= WRIT_NOP1; state_cnt <= 3; end
           WRIT_NOP1:	begin state <= WRIT_PRECAS; end
           WRIT_PRECAS:	begin state <= WRIT_CAS; command <= CMD_WRIT; end
-          WRIT_CAS:	begin state <= WRIT_NOP2; state_cnt <= 2; end
+          WRIT_CAS:	begin state <= WRIT_NOP2; state_cnt <= 15; end
           WRIT_NOP2:	begin state <= IDLE; end
 
-          // READ: CAS latency is two, so we spent one cycles in NOP2
-          READ_ACT:	begin state <= READ_NOP1; state_cnt <= 2; end
+          // READ: CAS latency is three, so we spent two cycles in NOP2
+          READ_ACT:	begin state <= READ_NOP1; state_cnt <= 3; end
           READ_NOP1:	begin state <= READ_PRECAS; end
           READ_PRECAS:	begin state <= READ_CAS; command <= CMD_READ; end
-          READ_CAS:	begin state <= READ_NOP2; state_cnt <= 0; end
+          READ_CAS:	begin state <= READ_NOP2; state_cnt <= 1; end
           READ_NOP2:	begin state <= READ_READ; end
-          READ_READ:	begin state <= IDLE; end
+          // READ_READ:	begin state <= IDLE; end
+          READ_READ:	begin state <= WRIT_NOP2; state_cnt <= 15; end
 
           default:	begin state <= IDLE; end
           endcase
