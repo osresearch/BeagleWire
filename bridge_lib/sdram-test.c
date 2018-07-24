@@ -12,19 +12,51 @@
 #include "sdram.h"
 
 void
+sdram_single_test(
+	sdram_t * const sdram,
+	const size_t ram_size
+) {
+	for(int j = 0 ; j < 8 ; j++)
+	{
+		const size_t offset = rand() % ram_size;
+		size_t errors = 0;
+
+		const uint8_t w = rand() & 0xF0;
+		sdram_addr(sdram, offset);
+		sdram_write8(sdram, w);
+
+		for(size_t i = 0 ; i < ram_size ; i++)
+		{
+			sdram_addr(sdram, offset);
+			uint8_t r = sdram_read8(sdram);
+			if (r == w)
+				continue;
+			errors++;
+		}
+
+		printf("single: %08zx errors %zu %.2f%%\n",
+			offset,
+			errors,
+			errors * 100.0 / ram_size
+		);
+	}
+}
+
+void
 sdram_simple_test(
 	sdram_t * const sdram,
 	const size_t ram_size
 ) {
 	uint8_t offset = time(NULL) & 0xFF;
 
+	printf("%s: writing\n", __func__);
 	for(size_t i = 0 ; i < ram_size ; i++)
 	{
 		uint8_t v = i + offset;
 		sdram_write(sdram, i, &v, sizeof(v));
-		usleep(10);
 	}
 
+	printf("%s: reading\n", __func__);
 	for(size_t i = 0 ; i < ram_size ; i++)
 	{
 		if (i % 16 == 0)
@@ -138,7 +170,7 @@ sdram_random_test(
 {
 	uint8_t * const mem = calloc(sizeof(*mem), ram_size);
 
-	printf("initialize \n");
+	printf("random initialize \n");
 	for(size_t i = 0 ; i < ram_size ; i++)
 		mem[i] = rand();
 
@@ -146,15 +178,17 @@ sdram_random_test(
 
 	size_t errors = 0;
 	size_t errors2 = 0;
+	size_t errors_fail = 0;
+
 	for(size_t i = 1 ; i < ram_size * 1024 ; i++)
 	{
 		if (i % 0x10000 == 0)
-			printf("%08x: %d errors %.3f%% (%d second try errors %.3f%%)\n",
+			printf("%08x: %d errors %.3f%% (retries %.3f fail %.3f%%)\n",
 				i,
 				errors,
 				errors * 100.0 / i,
-				errors2,
-				errors2 * 100.0 / i
+				errors ? errors2 * 1.0 / errors : 0,
+				errors ? errors_fail * 100.0 / errors : 0
 			);
 
 		const size_t j = rand() % ram_size;
@@ -165,32 +199,27 @@ sdram_random_test(
 
 		errors++;
 
-		sdram_addr(sdram, j);
-		const uint8_t s2 = sdram_read8(sdram);
-		if (s == mem[j])
-			continue;
+		for(int retry = 0 ; retry < 32 ; retry++)
+		{
 
-		// if both reads are consistent, then it is probably
-		// a write error
-		if (s2 != mem[j])
-			continue;
+			sdram_addr(sdram, j);
+			const uint8_t s2 = sdram_read8(sdram);
+			if (s2 == mem[j])
+			{
+				errors2 += retry;
+				break;
+			}
 
-		if(0)
-		printf("%08x: mem %02x != %02x or %02x\n",
-			j,
-			mem[j],
-			s,
-			s2
-		);
-
-		errors2++;
+			if (retry == 31)
+				errors_fail++;
+		}
 	}
 
-	printf("%d errors %.3f%% (%d second try errors %.3f%%)\n",
+	printf("%zu errors %.3f%% (retries avg %.3f%% total fail %zu)\n",
 		errors,
-		errors * 100.0 / ram_size,
-		errors2,
-		errors2 * 100.0 / ram_size
+		errors * 100.0 / ram_size / 1024.0,
+		errors ? errors2 * 100.0 / errors : 0,
+		errors_fail
 	);
 
 	free(mem);
@@ -270,6 +299,7 @@ int main(int argc, char **argv)
 
 	sdram_t * const sdram = sdram_init();
 
+	sdram_single_test(sdram, 0x10000);
 	sdram_simple_test(sdram, 0x100);
 	sdram_pong_test(sdram, ram_size);
 	sdram_bandwidth_test(sdram, ram_size);
