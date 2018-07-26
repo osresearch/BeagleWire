@@ -20,8 +20,9 @@ sdram_single_test(
 	{
 		const size_t offset = rand() % ram_size;
 		size_t errors = 0;
+		size_t hist[256] = {};
 
-		const uint8_t w = rand() & 0xF0;
+		const uint8_t w = rand() & 0xFF;
 		sdram_addr(sdram, offset);
 		sdram_write8(sdram, w);
 
@@ -29,16 +30,26 @@ sdram_single_test(
 		{
 			sdram_addr(sdram, offset);
 			uint8_t r = sdram_read8(sdram);
+			hist[r]++;
+			//hist[i] = r;
 			if (r == w)
 				continue;
 			errors++;
 		}
 
-		printf("single: %08zx errors %zu %.2f%%\n",
+		printf("single: %08zx=%02x errors %zu %.2f%%\n",
 			offset,
+			w,
 			errors,
 			errors * 100.0 / ram_size
 		);
+
+		for(unsigned x=0 ; x < 0x100 ; x++)
+		{
+			if (hist[x] == 0)
+				continue;
+			printf("%02x %zu\n", x, hist[x]);
+		}
 	}
 }
 
@@ -299,7 +310,7 @@ int main(int argc, char **argv)
 
 	sdram_t * const sdram = sdram_init();
 
-	sdram_single_test(sdram, 0x10000);
+	sdram_single_test(sdram, 0x100000);
 	sdram_simple_test(sdram, 0x100);
 	sdram_pong_test(sdram, ram_size);
 	sdram_bandwidth_test(sdram, ram_size);
